@@ -1,0 +1,11 @@
+__pycache__/       # Ignore Python bytecode cache directories
+*.pyc              # Ignore Python bytecode files
+*.pyo              # Ignore Python optimization files
+.env               # Ignore environment variable files (usually for local settings)
+.DS_Store          # Ignore macOS-specific metadata files
+.git/              # Ignore Git configuration and data
+*.db               # Ignore database files
+static/*           # Ignore all files in the static folder
+*.csv              # Ignore CSV files
+deepface_env/      # Ignore the deepface_env directory (for virtual environments)
+env/               # Ignore the env directory (another common virtual environment folder)
