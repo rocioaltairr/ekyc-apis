@@ -1,57 +1,67 @@
 import json
 import base64
-from http.server import BaseHTTPRequestHandler, HTTPServer
+import tempfile
+import os
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
 from deepface import DeepFace
+from fastapi.responses import JSONResponse
 
-class RequestHandler(BaseHTTPRequestHandler):
-    
-    def _send_response(self, code, content_type, data):
-        """發送 HTTP 回應"""
-        self.send_response(code)
-        self.send_header('Content-type', content_type)
-        self.end_headers()
-        self.wfile.write(data.encode())
+app = FastAPI()
 
-    def do_POST(self):
-        """處理 POST 請求"""
-        if self.path == '/face_verification':
-            # 讀取 POST 請求的內容
-            content_length = int(self.headers['Content-Length'])
-            post_data = self.rfile.read(content_length)
+# 定義輸入數據模型，使用 Pydantic
+class FaceVerificationRequest(BaseModel):
+    image_1: str  # Base64 編碼的圖片 1
+    image_2: str  # Base64 編碼的圖片 2
 
-            try:
-                # 解析 JSON 數據
-                input_data = json.loads(post_data)
+@app.get("/")
+async def root():
+    return {"message": "success"}
 
-                # 取得 Base64 編碼的圖片數據
-                data_1 = input_data['image_1']
-                data_2 = input_data['image_2']
+@app.post("/face_verification")
+async def face_verification(request: FaceVerificationRequest):
+    try:
+        # 讀取 Base64 編碼的圖片數據
+        data_1 = request.image_1
+        data_2 = request.image_2
 
-                # 使用 DeepFace 進行人臉驗證
-                result = DeepFace.verify(data_1, data_2, model_name="VGG-Face", detector_backend="opencv", 
-                                         distance_metric="cosine", enforce_detection=True, align=True, normalization="base")
+        # 去掉 Base64 前綴
+        if data_1.startswith('data:image'):
+            data_1 = data_1.split(',')[1]
+        if data_2.startswith('data:image'):
+            data_2 = data_2.split(',')[1]
 
-                # 準備回應數據
-                response_data = {
-                    "verification_distance": result['distance'],
-                    "verification_threshold": result['threshold'],
-                    "verification_result": bool(result['verified'])
-                }
+        # 解碼 Base64 圖像數據
+        img_data_1 = base64.b64decode(data_1)
+        img_data_2 = base64.b64decode(data_2)
 
-                # 發送回應
-                self._send_response(200, 'application/json', json.dumps(response_data))
+        # 儲存為臨時文件
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.jpg') as tmp_file_1:
+            tmp_file_1.write(img_data_1)
+            img_1_path = tmp_file_1.name
+        
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.jpg') as tmp_file_2:
+            tmp_file_2.write(img_data_2)
+            img_2_path = tmp_file_2.name
+        
+        # 使用 DeepFace 進行人臉驗證
+        result = DeepFace.verify(img_1_path, img_2_path, model_name="VGG-Face", detector_backend="opencv", 
+                                 distance_metric="cosine", enforce_detection=True, align=True, normalization="base")
 
-            except Exception as e:
-                # 錯誤處理，返回錯誤信息
-                error_response = {"error": str(e)}
-                self._send_response(400, 'application/json', json.dumps(error_response))
+        # 準備回應數據
+        response_data = {
+            "verification_distance": result['distance'],
+            "verification_threshold": result['threshold'],
+            "verification_result": bool(result['verified'])
+        }
 
-def run(server_class=HTTPServer, handler_class=RequestHandler, port=8080):
-    """啟動伺服器"""
-    server_address = ('', port)
-    httpd = server_class(server_address, handler_class)
-    print(f'Starting server on port {port}...')
-    httpd.serve_forever()
+        # 刪除臨時文件
+        os.remove(img_1_path)
+        os.remove(img_2_path)
 
-if __name__ == '__main__':
-    run()
+        return JSONResponse(content=response_data)
+
+    except Exception as e:
+        # 當發生錯誤時返回 400 錯誤
+        raise HTTPException(status_code=400, detail=f"Error: {str(e)}")
+
